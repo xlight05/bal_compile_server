@@ -1,0 +1,44 @@
+openapi: 3.0.0
+info:
+  title: Ballerina Compile API
+  description: This API compiles and returns diagnostics and new source codes
+  version: 1.0.0
+servers:
+  - url: http://localhost:8080
+paths:
+  /project/fix-diags:
+    post:
+      summary: Fixes diagnostics
+      description: |
+        This endpoint retrieves a specific file from a Ballerina package version.
+        It handles requests for different packages, versions, and files within the Ballerina organization.
+      requestBody:
+        description: Create a new pet in the store
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Request'
+        required: true
+      responses:
+        '200':
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Response'
+components:
+  schemas:
+    Request:
+      type: object
+      properties:
+        sourceCode:
+          type: string
+    Response:
+      type: object
+      properties:
+        sourceCode:
+          type: string
+        diagnostics:
+          type: array
+          items:
+            type: string

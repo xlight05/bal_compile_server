@@ -1,0 +1,189 @@
+/*
+ * Copyright (c) 2020, WSO2 Inc. (http://www.wso2.org) All Rights Reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ */
+
+plugins {
+    id 'base'
+    id 'org.springframework.boot' version '3.0.13'
+    id 'io.spring.dependency-management' version '1.0.15.RELEASE'
+    id 'com.github.spotbugs' version '5.0.13'
+    id 'de.undercouch.download' version '4.0.4'
+    id 'checkstyle'
+    id 'java'
+    id 'jacoco'
+}
+
+sourceCompatibility = JavaVersion.VERSION_17
+
+tasks.withType(JavaCompile) {
+    options.encoding = 'UTF-8'
+}
+
+// This particular version of ballerina should be available in the docker image used in the registry.project.api.Dockerfile.
+// To find a particular version of ballerina used in a ballerina base docker image, run the following command:
+// docker run -t ballerina/ballerina:<VERSION_TAG> ls /ballerina/runtime/bre/lib
+ext.ballerinaLangVersion = "2201.8.2"
+
+repositories {
+    mavenLocal()
+    mavenCentral()
+    maven {
+        url = 'https://repo.maven.apache.org/maven2'
+    }
+//    maven {
+//        url = 'https://maven.pkg.github.com/ballerina-platform/ballerina-lang'
+//        credentials {
+//            username System.getenv("packageUser")
+//            password System.getenv("packagePAT")
+//        }
+//    }
+//    maven {
+//        url = 'https://e95488c8-8511-4882-967f-ec3ae2a0f86f-dev.e1-us-east-azure.choreoapis.dev/ballerina-copilot/github-proxy-container/v1.0'
+//    }
+    maven {
+        url = 'https://selected-liger-new.ngrok-free.app'
+    }
+//    maven {
+//        url = 'http://localhost:5001'
+//        allowInsecureProtocol = true
+//    }
+}
+
+configurations {
+    balTools
+}
+
+dependencies {
+    balTools ("org.ballerinalang:jballerina-tools:${ballerinaLangVersion}") {
+        transitive = false
+    }
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+    implementation "org.ballerinalang:ballerina-lang:${ballerinaLangVersion}"
+    implementation "org.ballerinalang:ballerina-parser:${ballerinaLangVersion}"
+    implementation "org.ballerinalang:ballerina-tools-api:${ballerinaLangVersion}"
+    implementation 'com.google.code.gson:gson:2.10'
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+}
+
+def bDistribution = file("$project.buildDir/extracted-distribution/jballerina-tools-${ballerinaLangVersion}")
+task jBallerinaPack {
+    doLast {
+        configurations.balTools.resolvedConfiguration.resolvedArtifacts.each { artifact ->
+            copy {
+                from project.zipTree(artifact.getFile())
+                into new File(project.buildDir, "extracted-distribution/")
+            }
+        }
+    }
+    outputs.dir bDistribution
+}
+
+task downloadCheckstyleConfig(type: Download) {
+    src([
+        'https://raw.githubusercontent.com/wso2/code-quality-tools/v1.3/checkstyle/checkstyle.xml',
+        'https://raw.githubusercontent.com/wso2/code-quality-tools/v1.3/checkstyle/suppressions.xml'
+    ])
+    overwrite false
+    onlyIfNewer true
+    dest buildDir
+}
+
+task validateSpotbugs() {
+    doLast {
+        if (spotbugsMain.reports.size() > 0 &&
+                spotbugsMain.reports[0].destination.exists() &&
+                spotbugsMain.reports[0].destination.text.readLines().size() > 0) {
+            spotbugsMain.reports[0].destination?.eachLine {
+                println 'Failure: ' + it
+            }
+            throw new GradleException("Spotbugs rule violations were found.")
+        }
+    }
+}
+
+checkstyle {
+    toolVersion '8.18'
+    configFile = file("$buildDir/checkstyle.xml")
+    configProperties = ["suppressionFile": file("$buildDir/suppressions.xml")]
+}
+
+spotbugsMain {
+    ignoreFailures = true
+    effort = "max"
+    reportLevel = "low"
+    reportsDir = file("$project.buildDir/reports/spotbugs")
+    def excludeFile = file("spotbugs-exclude.xml")
+    if (excludeFile.exists()) {
+        it.excludeFilter = excludeFile
+    }
+    reports {
+        text.enabled = true
+    }
+}
+
+spotbugsTest {
+    it.enabled = false
+}
+
+test {
+    minHeapSize = "1024m" // initial heap size
+    maxHeapSize = "2048m" // maximum heap size
+    useJUnitPlatform()
+    environment "BALLERINA_HOME", bDistribution
+    testLogging.showStandardStreams = true
+    
+    jacoco {
+        enabled = true
+        destinationFile = file("$buildDir/jacoco/jacoco.exec")
+        includeNoLocationClasses = true
+        excludes = ['jdk.internal.*']
+    }
+    finalizedBy jacocoTestReport
+}
+
+jacoco {
+    toolVersion = "0.8.8"
+}
+
+jacocoTestReport {
+    dependsOn test
+    executionData file("$buildDir/jacoco/jacoco.exec")
+
+    sourceSets sourceSets.main
+
+    reports {
+        xml.enabled = true
+        html.enabled = true
+        csv.enabled = true
+        xml.destination = new File("${buildDir}/jacoco/reports/report.xml")
+        html.destination = new File("${buildDir}/jacoco/reports/report.html")
+        csv.destination = new File("${buildDir}/jacoco/reports/report.csv")
+    }
+
+    onlyIf = {
+        true
+    }
+}
+
+jar {
+    enabled = false
+}
+
+spotbugsMain.finalizedBy validateSpotbugs
+checkstyleMain.dependsOn downloadCheckstyleConfig
+bootJar.dependsOn jBallerinaPack

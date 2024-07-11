@@ -1,0 +1,8 @@
+target
+generated
+Config.toml
+build
+out
+gradle
+.idea
+.gradle
